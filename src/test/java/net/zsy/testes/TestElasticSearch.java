@@ -19,6 +19,9 @@ import org.elasticsearch.action.get.MultiGetResponse;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.index.IndexResponse;
+import org.elasticsearch.action.search.SearchRequestBuilder;
+import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.action.search.SearchType;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.Client;
@@ -30,6 +33,10 @@ import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
+import org.elasticsearch.index.query.QueryBuilder;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.search.SearchHit;
+import org.elasticsearch.search.SearchHits;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -54,7 +61,11 @@ public class TestElasticSearch {
 			e.printStackTrace();
 		}
 	}
-	/*===================================Document API Begin=======================================*/
+
+	/*
+	 * ===================================Document API
+	 * Begin=======================================
+	 */
 	/**
 	 * 使用JAVABEAN创建索引
 	 */
@@ -253,7 +264,38 @@ public class TestElasticSearch {
 			e.printStackTrace();
 		}
 	}
-	/*===================================Document API end=======================================*/
+
+	/*
+	 * ===================================Document API
+	 * End=======================================
+	 */
+
+	/*
+	 * ===================================Search API
+	 * Begin=======================================
+	 */
+	@Test
+	public void searchIndex() {
+		// 查询全部
+		// client.prepareSearch().get();
+		SearchRequestBuilder searchRequestBuilder = client
+				.prepareSearch("indices")
+				.setTypes(User.TYPE)
+				.setSearchType(SearchType.QUERY_THEN_FETCH)
+				.setQuery(
+						QueryBuilders.boolQuery().must(QueryBuilders.matchPhraseQuery("name", "Monkey D Luffy"))
+								.must(QueryBuilders.matchPhraseQuery("gender", "male")))
+				.setPostFilter(QueryBuilders.rangeQuery("age").from(0).to(20)).setExplain(true).setFrom(0).setSize(3);
+
+		System.out.println(searchRequestBuilder.toString().replaceAll("\\s", ""));
+		SearchResponse response = searchRequestBuilder.get();
+		SearchHits searchHits = response.getHits();
+		for (Iterator<SearchHit> it = searchHits.iterator(); it.hasNext();) {
+			SearchHit sh = it.next();
+			System.out.println(sh.getSourceAsString());
+		}
+
+	}
 
 	@After
 	public void closeClient() {
