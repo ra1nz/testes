@@ -19,6 +19,8 @@ import org.elasticsearch.action.get.MultiGetResponse;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.index.IndexResponse;
+import org.elasticsearch.action.search.MultiSearchRequestBuilder;
+import org.elasticsearch.action.search.MultiSearchResponse;
 import org.elasticsearch.action.search.SearchRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.SearchType;
@@ -33,10 +35,11 @@ import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
-import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
+import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -46,7 +49,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class TestElasticSearch {
 
-	private static final String addr = "192.168.100.101";
+	private static final String addr = "192.168.163.103";
 
 	Client client;
 
@@ -62,15 +65,11 @@ public class TestElasticSearch {
 		}
 	}
 
-	/*
-	 * ===================================Document API
-	 * Begin=======================================
-	 */
 	/**
 	 * 使用JAVABEAN创建索引
 	 */
 	@Test
-	public void createIndexUseBean() {
+	public void testCreateIndexUseBean() {
 		List<User> users = User.getUserBuilder().genUsers(10000);
 		ObjectMapper mapper = new ObjectMapper();
 
@@ -95,7 +94,7 @@ public class TestElasticSearch {
 	 * 使用XContentBuilder创建索引
 	 */
 	@Test
-	public void createIndexUseHelper() {
+	public void testCreateIndexUseHelper() {
 		List<User> users = User.getUserBuilder().genUsers(10);
 		try {
 			for (User user : users) {
@@ -123,7 +122,7 @@ public class TestElasticSearch {
 	 * 根据ID获取一个索引文档
 	 */
 	@Test
-	public void getIndex() {
+	public void testGetIndex() {
 		GetResponse response = client.prepareGet("indices", User.TYPE, "597421").setOperationThreaded(false).get();
 		System.out.println(response.getSourceAsMap());
 	}
@@ -132,7 +131,7 @@ public class TestElasticSearch {
 	 * 根据ID删除一个索引文档
 	 */
 	@Test
-	public void deleteIndex() {
+	public void testDeleteIndex() {
 		DeleteResponse response = client.prepareDelete("indices", User.TYPE, "597421").get();
 		System.out.println(response.getContext());
 	}
@@ -141,7 +140,7 @@ public class TestElasticSearch {
 	 * 更新索引（不存在即创建的写法）
 	 */
 	@Test
-	public void updateIndex() {
+	public void testUpdateIndex() {
 
 		User u = User.getUserBuilder().genUsers(1).get(0);
 		ObjectMapper mapper = new ObjectMapper();
@@ -188,7 +187,7 @@ public class TestElasticSearch {
 	 * 索引多个文档
 	 */
 	@Test
-	public void multiGetIndex() {
+	public void testMultiGetIndex() {
 		MultiGetResponse response = client.prepareMultiGet().add("indices", User.TYPE, "597421", "837407").get();
 		for (Iterator<MultiGetItemResponse> it = response.iterator(); it.hasNext();) {
 			GetResponse gr = it.next().getResponse();
@@ -202,7 +201,7 @@ public class TestElasticSearch {
 	 * 使用Bulk API一次发送多个类型的请求(DELETE/UPDATE/INDEX)
 	 */
 	@Test
-	public void bulkRequest() {
+	public void testBulkRequest() {
 		User u = User.getUserBuilder().genUsers(1).get(0);
 		ObjectMapper mapper = new ObjectMapper();
 		try {
@@ -225,7 +224,7 @@ public class TestElasticSearch {
 	}
 
 	@Test
-	public void bulkProcessor() {
+	public void testBulkProcessor() {
 		BulkProcessor bulkProcessor = BulkProcessor
 				.builder(client, new BulkProcessor.Listener() {
 
@@ -265,17 +264,8 @@ public class TestElasticSearch {
 		}
 	}
 
-	/*
-	 * ===================================Document API
-	 * End=======================================
-	 */
-
-	/*
-	 * ===================================Search API
-	 * Begin=======================================
-	 */
 	@Test
-	public void searchIndex() {
+	public void testSearchIndex() {
 		// 查询全部
 		// client.prepareSearch().get();
 		SearchRequestBuilder searchRequestBuilder = client
@@ -294,7 +284,65 @@ public class TestElasticSearch {
 			SearchHit sh = it.next();
 			System.out.println(sh.getSourceAsString());
 		}
+	}
 
+	@Test
+	public void testScroll() {
+		SearchResponse response = client.prepareSearch("indices").setSearchType(SearchType.SCAN)
+				.setScroll(new TimeValue(60000))
+				.setQuery(QueryBuilders.boolQuery().must(QueryBuilders.matchPhraseQuery("name", "Monkey D Luffy")))
+				.setSize(3).get();
+		while (true) {
+			System.out.println(response.getScrollId());
+			for (SearchHit hit : response.getHits()) {
+				System.out.println(hit.getSourceAsString());
+			}
+			response = client.prepareSearchScroll(response.getScrollId()).setScroll(new TimeValue(60000)).get();
+			if (response.getHits().getHits().length == 0)
+				break;
+		}
+	}
+
+	@Test
+	public void testMultiSearch() {
+		SearchRequestBuilder builder1 = client.prepareSearch().setQuery(QueryBuilders.queryStringQuery("female"))
+				.setSize(1);
+		SearchRequestBuilder builder2 = client.prepareSearch()
+				.setQuery(QueryBuilders.matchQuery("name", "Monkey D Luffy")).setSize(1);
+
+		MultiSearchRequestBuilder requestBuilder = client.prepareMultiSearch().add(builder1).add(builder2);
+		MultiSearchResponse response = requestBuilder.get();
+
+		for (MultiSearchResponse.Item item : response.getResponses()) {
+			SearchResponse r = item.getResponse();
+			for (SearchHit hit : r.getHits()) {
+				System.out.println(hit.getSourceAsString());
+			}
+		}
+	}
+
+	@Test
+	public void testAggregations() {
+		SearchResponse response = client.prepareSearch().setQuery(QueryBuilders.matchAllQuery())
+				.addAggregation(AggregationBuilders.terms("agg1").field("age"))
+				// .addAggregation(AggregationBuilders.dateHistogram("birthday").interval(DateHistogramInterval.YEAR))
+				.get();
+
+		Terms agg1 = response.getAggregations().get("agg1");
+		for (Iterator<Terms.Bucket> it = agg1.getBuckets().iterator(); it.hasNext();) {
+			Terms.Bucket bucket = it.next();
+			System.out.println(bucket.getKeyAsString());
+			System.out.println(bucket.getDocCount());
+		}
+	}
+
+	@Test
+	public void testTerminateAfter() {
+		SearchResponse response = client.prepareSearch("indices").setTerminateAfter(1000)// 1000条数据后终止
+				.get();
+
+		System.out.println(response.isTerminatedEarly());
+		System.out.println(response.getHits().getTotalHits());
 	}
 
 	@After
