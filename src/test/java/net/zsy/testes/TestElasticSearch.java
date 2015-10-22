@@ -45,13 +45,18 @@ import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramInterval;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
+import org.elasticsearch.search.aggregations.bucket.terms.TermsBuilder;
 import org.elasticsearch.search.aggregations.metrics.avg.Avg;
 import org.elasticsearch.search.aggregations.metrics.avg.AvgBuilder;
+import org.elasticsearch.search.aggregations.metrics.cardinality.Cardinality;
+import org.elasticsearch.search.aggregations.metrics.cardinality.CardinalityBuilder;
 import org.elasticsearch.search.aggregations.metrics.max.Max;
 import org.elasticsearch.search.aggregations.metrics.max.MaxBuilder;
 import org.elasticsearch.search.aggregations.metrics.min.Min;
 import org.elasticsearch.search.aggregations.metrics.min.MinBuilder;
 import org.elasticsearch.search.aggregations.metrics.percentiles.Percentile;
+import org.elasticsearch.search.aggregations.metrics.percentiles.PercentileRanks;
+import org.elasticsearch.search.aggregations.metrics.percentiles.PercentileRanksBuilder;
 import org.elasticsearch.search.aggregations.metrics.percentiles.Percentiles;
 import org.elasticsearch.search.aggregations.metrics.percentiles.PercentilesBuilder;
 import org.elasticsearch.search.aggregations.metrics.stats.Stats;
@@ -60,6 +65,7 @@ import org.elasticsearch.search.aggregations.metrics.stats.extended.ExtendedStat
 import org.elasticsearch.search.aggregations.metrics.stats.extended.ExtendedStatsBuilder;
 import org.elasticsearch.search.aggregations.metrics.sum.Sum;
 import org.elasticsearch.search.aggregations.metrics.sum.SumBuilder;
+import org.elasticsearch.search.aggregations.metrics.tophits.TopHits;
 import org.elasticsearch.search.aggregations.metrics.valuecount.ValueCount;
 import org.elasticsearch.search.aggregations.metrics.valuecount.ValueCountBuilder;
 import org.junit.After;
@@ -122,15 +128,13 @@ public class TestElasticSearch {
 		try {
 			for (User user : users) {
 				XContentBuilder contentbuilder = XContentFactory.jsonBuilder();
-				IndexRequestBuilder builder = client
-						.prepareIndex("indices", User.TYPE)
+				IndexRequestBuilder builder = client.prepareIndex("indices", User.TYPE)
 						.setId(String.valueOf(user.getId()))
-						.setSource(
-								contentbuilder.startObject().field("id", user.getId()).field("name", user.getName())
-										.field("age", user.getAge()).field("gender", user.getGender())
-										.field("birthday", user.getBirthday()).field("mobile", user.getMobile())
-										.field("hobbies", user.getHobbies()).field("tag_createdatetime", new Date())
-										.endObject());
+						.setSource(contentbuilder.startObject().field("id", user.getId()).field("name", user.getName())
+								.field("age", user.getAge()).field("gender", user.getGender())
+								.field("birthday", user.getBirthday()).field("mobile", user.getMobile())
+								.field("hobbies", user.getHobbies()).field("tag_createdatetime", new Date())
+								.endObject());
 
 				IndexResponse response = builder.get();
 				System.out.println("create:" + response.getIndex() + "/" + response.getType() + "/" + response.getId()
@@ -230,11 +234,10 @@ public class TestElasticSearch {
 		ObjectMapper mapper = new ObjectMapper();
 		mapper.setDateFormat(DateFormat.getDateTimeInstance());
 		try {
-			BulkResponse response = client
-					.prepareBulk()
-					.add(client.prepareIndex("indices", User.TYPE, String.valueOf(u.getId())).setSource(
-							mapper.writeValueAsBytes(u))).add(client.prepareDelete("indices", User.TYPE, "837407"))
-					.get();
+			BulkResponse response = client.prepareBulk()
+					.add(client.prepareIndex("indices", User.TYPE, String.valueOf(u.getId()))
+							.setSource(mapper.writeValueAsBytes(u)))
+					.add(client.prepareDelete("indices", User.TYPE, "837407")).get();
 			System.out.println("Has filure:" + response.hasFailures());
 			for (Iterator<BulkItemResponse> it = response.iterator(); it.hasNext();) {
 				BulkItemResponse b = it.next();
@@ -250,36 +253,35 @@ public class TestElasticSearch {
 
 	@Test
 	public void testBulkProcessor() {
-		BulkProcessor bulkProcessor = BulkProcessor
-				.builder(client, new BulkProcessor.Listener() {
+		BulkProcessor bulkProcessor = BulkProcessor.builder(client, new BulkProcessor.Listener() {
 
-					public void beforeBulk(long executionId, BulkRequest request) {
-						System.out.println("Before bulk:" + executionId + request.numberOfActions());
-					}
+			public void beforeBulk(long executionId, BulkRequest request) {
+				System.out.println("Before bulk:" + executionId + request.numberOfActions());
+			}
 
-					public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
-						System.out.println("After bulk with failure:" + executionId + request.numberOfActions());
-						failure.printStackTrace();
-					}
+			public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
+				System.out.println("After bulk with failure:" + executionId + request.numberOfActions());
+				failure.printStackTrace();
+			}
 
-					public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
-						System.out.println("After bulk:" + executionId + request.numberOfActions());
-						for (Iterator<BulkItemResponse> it = response.iterator(); it.hasNext();) {
-							BulkItemResponse b = it.next();
-							System.out.println(b.isFailed());
-							System.out.println(b.getOpType() + ":" + b.getIndex() + "/" + b.getType() + "/" + b.getId()
-									+ " version:" + b.getVersion());
-						}
-					}
-				}).setBulkActions(1000).setBulkSize(new ByteSizeValue(5, ByteSizeUnit.MB))
+			public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
+				System.out.println("After bulk:" + executionId + request.numberOfActions());
+				for (Iterator<BulkItemResponse> it = response.iterator(); it.hasNext();) {
+					BulkItemResponse b = it.next();
+					System.out.println(b.isFailed());
+					System.out.println(b.getOpType() + ":" + b.getIndex() + "/" + b.getType() + "/" + b.getId()
+							+ " version:" + b.getVersion());
+				}
+			}
+		}).setBulkActions(1000).setBulkSize(new ByteSizeValue(5, ByteSizeUnit.MB))
 				.setFlushInterval(TimeValue.timeValueSeconds(2)).setConcurrentRequests(1).build();
 
 		User u = User.getUserBuilder().genUsers(1).get(0);
 		ObjectMapper mapper = new ObjectMapper();
 		mapper.setDateFormat(DateFormat.getDateTimeInstance());
 		try {
-			bulkProcessor.add(new IndexRequest("indices", User.TYPE, String.valueOf(u.getId())).source(mapper
-					.writeValueAsBytes(u)));
+			bulkProcessor.add(new IndexRequest("indices", User.TYPE, String.valueOf(u.getId()))
+					.source(mapper.writeValueAsBytes(u)));
 		} catch (JsonProcessingException e) {
 			e.printStackTrace();
 		}
@@ -294,13 +296,10 @@ public class TestElasticSearch {
 	public void testSearchIndex() {
 		// 查询全部
 		// client.prepareSearch().get();
-		SearchRequestBuilder searchRequestBuilder = client
-				.prepareSearch("indices")
-				.setTypes(User.TYPE)
+		SearchRequestBuilder searchRequestBuilder = client.prepareSearch("indices").setTypes(User.TYPE)
 				.setSearchType(SearchType.QUERY_THEN_FETCH)
-				.setQuery(
-						QueryBuilders.boolQuery().must(QueryBuilders.matchPhraseQuery("name", "Monkey D Luffy"))
-								.must(QueryBuilders.matchPhraseQuery("gender", "male")))
+				.setQuery(QueryBuilders.boolQuery().must(QueryBuilders.matchPhraseQuery("name", "Monkey D Luffy"))
+						.must(QueryBuilders.matchPhraseQuery("gender", "male")))
 				.setPostFilter(QueryBuilders.rangeQuery("age").from(0).to(20)).setExplain(true).setFrom(0).setSize(3);
 
 		System.out.println(searchRequestBuilder.toString());
@@ -373,8 +372,8 @@ public class TestElasticSearch {
 
 	@Test
 	public void testCount() {
-		CountRequestBuilder builder = client.prepareCount("indices").setQuery(
-				QueryBuilders.matchPhraseQuery("name", "Monkey D Luffy"));
+		CountRequestBuilder builder = client.prepareCount("indices")
+				.setQuery(QueryBuilders.matchPhraseQuery("name", "Monkey D Luffy"));
 		System.out.println(builder.toString());
 		CountResponse response = builder.get();
 		System.out.println(response.getCount());
@@ -382,13 +381,10 @@ public class TestElasticSearch {
 
 	@Test
 	public void testStructAggregations() {
-		SearchRequestBuilder requestBuilder = client.prepareSearch("indices").addAggregation(
-				AggregationBuilders
-						.terms("by_name")
-						.field("name")
-						.subAggregation(
-								AggregationBuilders.dateHistogram("by_year").field("birthday")
-										.format("yyyy-MM-dd HH:mm:ss").interval(DateHistogramInterval.YEAR)));
+		SearchRequestBuilder requestBuilder = client.prepareSearch("indices")
+				.addAggregation(AggregationBuilders.terms("by_name").field("name")
+						.subAggregation(AggregationBuilders.dateHistogram("by_year").field("birthday")
+								.format("yyyy-MM-dd HH:mm:ss").interval(DateHistogramInterval.YEAR)));
 		System.out.println(requestBuilder.toString());
 		SearchResponse response = requestBuilder.get();
 		System.out.println(response.getAggregations().getAsMap());
@@ -470,6 +466,45 @@ public class TestElasticSearch {
 		for (Iterator<Percentile> it = percentiles.iterator(); it.hasNext();) {
 			Percentile p = it.next();
 			System.out.println("percent:" + p.getPercent() + " value:" + p.getValue());
+		}
+		// Percentile Ranks Aggregation
+		PercentileRanksBuilder percentileRanksBuilder = AggregationBuilders.percentileRanks("agg").field("age")
+				.percentiles(20, 25, 50);
+		requestBuilder = client.prepareSearch("indices").addAggregation(percentileRanksBuilder);
+		System.out.println(requestBuilder.toString());
+		response = requestBuilder.get();
+
+		PercentileRanks percentileRanks = response.getAggregations().get("agg");
+		for (Percentile p : percentileRanks) {
+			System.out.println("percent:" + p.getPercent() + " value:" + p.getValue());
+		}
+
+		// Cardinality Aggregation 基数
+		CardinalityBuilder cardinalityBuilder = AggregationBuilders.cardinality("agg").field("name");
+		requestBuilder = client.prepareSearch("indices").addAggregation(cardinalityBuilder);
+		System.out.println(requestBuilder.toString());
+		response = requestBuilder.get();
+
+		Cardinality cardinality = response.getAggregations().get("agg");
+		System.out.println(cardinality.getValue());
+
+		// Ceo Bounds Aggregation 地理边界
+
+		// Top Hits
+		TermsBuilder termsBuilder = AggregationBuilders.terms("agg").field("gender")
+				.subAggregation(AggregationBuilders.topHits("top"));
+		requestBuilder = client.prepareSearch("indices").addAggregation(termsBuilder);
+		System.out.println(requestBuilder.toString());
+		response = requestBuilder.get();
+
+		Terms terms = response.getAggregations().get("agg");
+		for (Terms.Bucket entry : terms.getBuckets()) {
+			System.out.println("key:" + entry.getKey() + " doc_cout:" + entry.getDocCount());
+
+			TopHits topHits = entry.getAggregations().get("top");
+			for (SearchHit hit : topHits.getHits().getHits()) {
+				System.out.println(" ->id " + hit.getId() + ",_source:" + hit.getSourceAsString());
+			}
 		}
 
 	}
