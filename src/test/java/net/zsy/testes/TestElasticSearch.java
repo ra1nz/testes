@@ -3,6 +3,8 @@ package net.zsy.testes;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.text.DateFormat;
+import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -12,6 +14,8 @@ import org.elasticsearch.action.bulk.BulkItemResponse;
 import org.elasticsearch.action.bulk.BulkProcessor;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
+import org.elasticsearch.action.count.CountRequestBuilder;
+import org.elasticsearch.action.count.CountResponse;
 import org.elasticsearch.action.delete.DeleteResponse;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.get.MultiGetItemResponse;
@@ -39,7 +43,25 @@ import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramInterval;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
+import org.elasticsearch.search.aggregations.metrics.avg.Avg;
+import org.elasticsearch.search.aggregations.metrics.avg.AvgBuilder;
+import org.elasticsearch.search.aggregations.metrics.max.Max;
+import org.elasticsearch.search.aggregations.metrics.max.MaxBuilder;
+import org.elasticsearch.search.aggregations.metrics.min.Min;
+import org.elasticsearch.search.aggregations.metrics.min.MinBuilder;
+import org.elasticsearch.search.aggregations.metrics.percentiles.Percentile;
+import org.elasticsearch.search.aggregations.metrics.percentiles.Percentiles;
+import org.elasticsearch.search.aggregations.metrics.percentiles.PercentilesBuilder;
+import org.elasticsearch.search.aggregations.metrics.stats.Stats;
+import org.elasticsearch.search.aggregations.metrics.stats.StatsBuilder;
+import org.elasticsearch.search.aggregations.metrics.stats.extended.ExtendedStats;
+import org.elasticsearch.search.aggregations.metrics.stats.extended.ExtendedStatsBuilder;
+import org.elasticsearch.search.aggregations.metrics.sum.Sum;
+import org.elasticsearch.search.aggregations.metrics.sum.SumBuilder;
+import org.elasticsearch.search.aggregations.metrics.valuecount.ValueCount;
+import org.elasticsearch.search.aggregations.metrics.valuecount.ValueCountBuilder;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -49,7 +71,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class TestElasticSearch {
 
-	private static final String addr = "192.168.163.103";
+	private static final String addr = "192.168.100.101";
 
 	Client client;
 
@@ -72,6 +94,7 @@ public class TestElasticSearch {
 	public void testCreateIndexUseBean() {
 		List<User> users = User.getUserBuilder().genUsers(10000);
 		ObjectMapper mapper = new ObjectMapper();
+		mapper.setDateFormat(DateFormat.getDateTimeInstance());
 
 		IndexRequestBuilder builder = client.prepareIndex("indices", User.TYPE);
 		for (User user : users) {
@@ -91,11 +114,11 @@ public class TestElasticSearch {
 	}
 
 	/**
-	 * 使用XContentBuilder创建索引
+	 * 使用XContentBuilder创建索引(推荐)
 	 */
 	@Test
 	public void testCreateIndexUseHelper() {
-		List<User> users = User.getUserBuilder().genUsers(10);
+		List<User> users = User.getUserBuilder().genUsers(1);
 		try {
 			for (User user : users) {
 				XContentBuilder contentbuilder = XContentFactory.jsonBuilder();
@@ -105,8 +128,8 @@ public class TestElasticSearch {
 						.setSource(
 								contentbuilder.startObject().field("id", user.getId()).field("name", user.getName())
 										.field("age", user.getAge()).field("gender", user.getGender())
-										.field("birthday", user.getBirthday().getTime())
-										.field("mobile", user.getMobile()).field("hobbies", user.getHobbies())
+										.field("birthday", user.getBirthday()).field("mobile", user.getMobile())
+										.field("hobbies", user.getHobbies()).field("tag_createdatetime", new Date())
 										.endObject());
 
 				IndexResponse response = builder.get();
@@ -144,6 +167,7 @@ public class TestElasticSearch {
 
 		User u = User.getUserBuilder().genUsers(1).get(0);
 		ObjectMapper mapper = new ObjectMapper();
+		mapper.setDateFormat(DateFormat.getDateTimeInstance());
 		try {
 			// 先构造一个index请求
 			IndexRequest indexRequest = new IndexRequest();
@@ -204,6 +228,7 @@ public class TestElasticSearch {
 	public void testBulkRequest() {
 		User u = User.getUserBuilder().genUsers(1).get(0);
 		ObjectMapper mapper = new ObjectMapper();
+		mapper.setDateFormat(DateFormat.getDateTimeInstance());
 		try {
 			BulkResponse response = client
 					.prepareBulk()
@@ -251,6 +276,7 @@ public class TestElasticSearch {
 
 		User u = User.getUserBuilder().genUsers(1).get(0);
 		ObjectMapper mapper = new ObjectMapper();
+		mapper.setDateFormat(DateFormat.getDateTimeInstance());
 		try {
 			bulkProcessor.add(new IndexRequest("indices", User.TYPE, String.valueOf(u.getId())).source(mapper
 					.writeValueAsBytes(u)));
@@ -277,7 +303,7 @@ public class TestElasticSearch {
 								.must(QueryBuilders.matchPhraseQuery("gender", "male")))
 				.setPostFilter(QueryBuilders.rangeQuery("age").from(0).to(20)).setExplain(true).setFrom(0).setSize(3);
 
-		System.out.println(searchRequestBuilder.toString().replaceAll("\\s", ""));
+		System.out.println(searchRequestBuilder.toString());
 		SearchResponse response = searchRequestBuilder.get();
 		SearchHits searchHits = response.getHits();
 		for (Iterator<SearchHit> it = searchHits.iterator(); it.hasNext();) {
@@ -325,7 +351,7 @@ public class TestElasticSearch {
 	public void testAggregations() {
 		SearchResponse response = client.prepareSearch().setQuery(QueryBuilders.matchAllQuery())
 				.addAggregation(AggregationBuilders.terms("agg1").field("age"))
-				// .addAggregation(AggregationBuilders.dateHistogram("birthday").interval(DateHistogramInterval.YEAR))
+				.addAggregation(AggregationBuilders.dateHistogram("birthday").interval(DateHistogramInterval.YEAR))
 				.get();
 
 		Terms agg1 = response.getAggregations().get("agg1");
@@ -345,6 +371,109 @@ public class TestElasticSearch {
 		System.out.println(response.getHits().getTotalHits());
 	}
 
+	@Test
+	public void testCount() {
+		CountRequestBuilder builder = client.prepareCount("indices").setQuery(
+				QueryBuilders.matchPhraseQuery("name", "Monkey D Luffy"));
+		System.out.println(builder.toString());
+		CountResponse response = builder.get();
+		System.out.println(response.getCount());
+	}
+
+	@Test
+	public void testStructAggregations() {
+		SearchRequestBuilder requestBuilder = client.prepareSearch("indices").addAggregation(
+				AggregationBuilders
+						.terms("by_name")
+						.field("name")
+						.subAggregation(
+								AggregationBuilders.dateHistogram("by_year").field("birthday")
+										.format("yyyy-MM-dd HH:mm:ss").interval(DateHistogramInterval.YEAR)));
+		System.out.println(requestBuilder.toString());
+		SearchResponse response = requestBuilder.get();
+		System.out.println(response.getAggregations().getAsMap());
+	}
+
+	@Test
+	public void testMetricsAggregations() {
+
+		SearchRequestBuilder requestBuilder = null;
+		SearchResponse response = null;
+
+		// Min Aggregation
+		MinBuilder minBuilder = AggregationBuilders.min("agg").field("age");
+		requestBuilder = client.prepareSearch("indices").addAggregation(minBuilder);
+		System.out.println(requestBuilder.toString());
+		response = requestBuilder.get();
+		Min minAgg = response.getAggregations().get("agg");
+		System.out.println("min:" + minAgg.getValue());
+
+		// Max Aggregation
+		MaxBuilder maxBuilder = AggregationBuilders.max("agg").field("age");
+		requestBuilder = client.prepareSearch("indices").addAggregation(maxBuilder);
+		System.out.println(requestBuilder.toString());
+		response = requestBuilder.get();
+		Max maxAgg = response.getAggregations().get("agg");
+		System.out.println("max:" + maxAgg.getValue());
+
+		// Sum Aggregation
+		SumBuilder sumBuilder = AggregationBuilders.sum("agg").field("age");
+		requestBuilder = client.prepareSearch("indices").addAggregation(sumBuilder);
+		System.out.println(requestBuilder.toString());
+		response = requestBuilder.get();
+		Sum sumAgg = response.getAggregations().get("agg");
+		System.out.println("sum:" + sumAgg.getValue());
+
+		// Avg Aggregation
+		AvgBuilder avgBuilder = AggregationBuilders.avg("agg").field("age");
+		requestBuilder = client.prepareSearch("indices").addAggregation(avgBuilder);
+		System.out.println(requestBuilder.toString());
+		response = requestBuilder.get();
+		Avg avgAgg = response.getAggregations().get("agg");
+		System.out.println("avg:" + avgAgg.getValue());
+
+		// Stats Aggregation
+		StatsBuilder statsBuilder = AggregationBuilders.stats("agg").field("age");
+		requestBuilder = client.prepareSearch("indices").addAggregation(statsBuilder);
+		System.out.println(requestBuilder.toString());
+		response = requestBuilder.get();
+		Stats statsAgg = response.getAggregations().get("agg");
+		System.out.println("stats min:" + statsAgg.getMin() + " max:" + statsAgg.getMax() + " sum:" + statsAgg.getSum()
+				+ " avg:" + statsAgg.getAvg() + " count:" + statsAgg.getCount());
+
+		// Extended Stats Aggregation
+		ExtendedStatsBuilder extendedStatsBuilder = AggregationBuilders.extendedStats("agg").field("age");
+		requestBuilder = client.prepareSearch("indices").addAggregation(extendedStatsBuilder);
+		System.out.println(requestBuilder.toString());
+		response = requestBuilder.get();
+		ExtendedStats extendedStats = response.getAggregations().get("agg");
+		System.out.println("extended stats min:" + extendedStats.getMin() + " max:" + extendedStats.getMax() + " sum:"
+				+ extendedStats.getSum() + " avg:" + extendedStats.getAvg() + " count:" + extendedStats.getCount());
+		System.out.println("standard deviation:" + extendedStats.getStdDeviation() + " sum of squares:"
+				+ extendedStats.getSumOfSquares() + " variance:" + extendedStats.getVariance());
+
+		// Value Count Aggregation
+		ValueCountBuilder valueCountBuilder = AggregationBuilders.count("agg").field("age");
+		requestBuilder = client.prepareSearch("indices").addAggregation(valueCountBuilder);
+		System.out.println(requestBuilder.toString());
+		response = requestBuilder.get();
+		ValueCount valueCount = response.getAggregations().get("agg");
+		System.out.println("value count:" + valueCount.getValue());
+
+		// Percentile Aggregation
+		PercentilesBuilder percentilesBuilder = AggregationBuilders.percentiles("agg").field("age");
+		requestBuilder = client.prepareSearch("indices").addAggregation(percentilesBuilder);
+		System.out.println(requestBuilder.toString());
+		response = requestBuilder.get();
+		Percentiles percentiles = response.getAggregations().get("agg");
+
+		for (Iterator<Percentile> it = percentiles.iterator(); it.hasNext();) {
+			Percentile p = it.next();
+			System.out.println("percent:" + p.getPercent() + " value:" + p.getValue());
+		}
+
+	}
+
 	@After
 	public void closeClient() {
 		if (client != null) {
@@ -354,12 +483,12 @@ public class TestElasticSearch {
 
 	public static void main(String[] args) {
 		ObjectMapper mapper = new ObjectMapper();
+		mapper.setDateFormat(DateFormat.getDateTimeInstance(2, 2));
 		List<User> users = User.getUserBuilder().genUsers(1);
 		try {
 			String json = mapper.writeValueAsString(users.get(0));
 			System.out.println(json);
 		} catch (JsonProcessingException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 	}
