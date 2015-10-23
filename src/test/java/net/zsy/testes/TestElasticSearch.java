@@ -43,7 +43,26 @@ import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.bucket.children.Children;
+import org.elasticsearch.search.aggregations.bucket.children.ChildrenBuilder;
+import org.elasticsearch.search.aggregations.bucket.filter.Filter;
+import org.elasticsearch.search.aggregations.bucket.filter.FilterAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.filters.Filters;
+import org.elasticsearch.search.aggregations.bucket.filters.FiltersAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.global.Global;
+import org.elasticsearch.search.aggregations.bucket.global.GlobalBuilder;
+import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramBuilder;
 import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramInterval;
+import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
+import org.elasticsearch.search.aggregations.bucket.histogram.HistogramBuilder;
+import org.elasticsearch.search.aggregations.bucket.missing.Missing;
+import org.elasticsearch.search.aggregations.bucket.missing.MissingBuilder;
+import org.elasticsearch.search.aggregations.bucket.nested.Nested;
+import org.elasticsearch.search.aggregations.bucket.nested.NestedBuilder;
+import org.elasticsearch.search.aggregations.bucket.range.Range;
+import org.elasticsearch.search.aggregations.bucket.range.RangeAggregator;
+import org.elasticsearch.search.aggregations.bucket.range.RangeBuilder;
+import org.elasticsearch.search.aggregations.bucket.range.date.DateRangeBuilder;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.aggregations.bucket.terms.TermsBuilder;
 import org.elasticsearch.search.aggregations.metrics.avg.Avg;
@@ -506,6 +525,152 @@ public class TestElasticSearch {
 				System.out.println(" ->id " + hit.getId() + ",_source:" + hit.getSourceAsString());
 			}
 		}
+
+	}
+
+	@Test
+	public void testBucketAggregations() {
+
+		SearchRequestBuilder requestBuilder = null;
+		SearchResponse response = null;
+
+		// Global Aggregation
+		GlobalBuilder globalBuilder = AggregationBuilders.global("agg")
+				.subAggregation(AggregationBuilders.terms("genders").field("gender"));
+		requestBuilder = client.prepareSearch("indices").addAggregation(globalBuilder);
+		System.out.println(requestBuilder);
+		response = requestBuilder.get();
+		Global global = response.getAggregations().get("agg");
+		System.out.println("global:" + global.getDocCount());
+
+		// Filter Aggregation
+		FilterAggregationBuilder filterAggregationBuilder = AggregationBuilders.filter("agg")
+				.filter(QueryBuilders.termQuery("gender", "female"));
+		requestBuilder = client.prepareSearch("indices").addAggregation(filterAggregationBuilder);
+		System.out.println(requestBuilder);
+		response = requestBuilder.get();
+		Filter filter = response.getAggregations().get("agg");
+		System.out.println(filter.getDocCount());
+
+		// Filters Aggregation
+		FiltersAggregationBuilder filtersAggregationBuilder = AggregationBuilders.filters("agg")
+				.filter("man", QueryBuilders.termQuery("gender", "male"))
+				.filter("woman", QueryBuilders.termQuery("gender", "female"));
+		requestBuilder = client.prepareSearch("indices").addAggregation(filtersAggregationBuilder);
+		System.out.println(requestBuilder);
+		response = requestBuilder.get();
+		Filters filters = response.getAggregations().get("agg");
+
+		for (Filters.Bucket bucket : filters.getBuckets()) {
+			System.out.println("key:" + bucket.getKey() + " doc_count:" + bucket.getDocCount());
+		}
+
+		// Missing Aggregation
+		MissingBuilder missingBuilder = AggregationBuilders.missing("agg").field("gender");
+		requestBuilder = client.prepareSearch("indices").addAggregation(missingBuilder);
+		System.out.println(requestBuilder);
+		response = requestBuilder.get();
+		Missing missing = response.getAggregations().get("agg");
+		System.out.println(missing.getDocCount());
+
+		// Nested Aggregation 内嵌查询 什么鬼
+		NestedBuilder nestedBuilder = AggregationBuilders.nested("agg").path("hobbies");
+		requestBuilder = client.prepareSearch("indices").addAggregation(nestedBuilder);
+		System.out.println(requestBuilder);
+		response = requestBuilder.get();
+		Nested nested = response.getAggregations().get("agg");
+		System.out.println("nested:" + nested.getDocCount());
+
+		// Reverse Nested Aggregation
+
+		// Children Aggregation
+		ChildrenBuilder childrenBuilder = AggregationBuilders.children("agg").childType("hobbies");
+		requestBuilder = client.prepareSearch("indices").addAggregation(childrenBuilder);
+		System.out.println(requestBuilder);
+		response = requestBuilder.get();
+
+		Children children = response.getAggregations().get("agg");
+		System.out.println("children:" + children.getDocCount());
+
+		// Terms Aggregation
+		TermsBuilder termsBuilder = AggregationBuilders.terms("genders").field("gender");
+		requestBuilder = client.prepareSearch("indices").addAggregation(termsBuilder);
+		System.out.println(requestBuilder);
+		response = requestBuilder.get();
+
+		Terms terms = response.getAggregations().get("genders");
+		for (Terms.Bucket bucket : terms.getBuckets()) {
+			System.out.println(bucket.getKey() + " " + bucket.getDocCount());
+		}
+
+		// Order
+		TermsBuilder termsBuilderWithOrder = AggregationBuilders.terms("genders").field("gender")
+				.order(Terms.Order.term(true));// by term asc
+		// by count asc
+		termsBuilderWithOrder = AggregationBuilders.terms("genders").field("gender").order(Terms.Order.count(true));
+		// with sub aggregation
+		termsBuilderWithOrder = AggregationBuilders.terms("genders").field("gender")
+				.order(Terms.Order.aggregation("avg_age", false))
+				.subAggregation(AggregationBuilders.avg("avg_age").field("age"));
+		requestBuilder = client.prepareSearch("indices").addAggregation(termsBuilderWithOrder);
+		System.out.println(requestBuilder);
+		response = requestBuilder.get();
+
+		Terms termsWithOrder = response.getAggregations().get("genders");
+		for (Terms.Bucket bucket : termsWithOrder.getBuckets()) {
+			System.out.println(bucket.getKey() + " " + bucket.getDocCount());
+		}
+
+		// Range Aggregation
+		RangeBuilder rangeBuilder = AggregationBuilders.range("agg").field("age").addUnboundedTo(1).addRange(1, 20)
+				.addUnboundedFrom(20);
+		requestBuilder = client.prepareSearch("indices").addAggregation(rangeBuilder);
+		System.out.println(requestBuilder);
+		response = requestBuilder.get();
+		Range range = response.getAggregations().get("agg");
+
+		for (Range.Bucket bucket : range.getBuckets()) {
+			System.out.println(
+					bucket.getKey() + " " + bucket.getFrom() + " " + bucket.getTo() + " " + bucket.getDocCount());
+		}
+
+		// Date Range Aggregation
+		DateRangeBuilder dateRangeBuilder = AggregationBuilders.dateRange("agg").field("birthday").format("yyyy")
+				.addUnboundedTo(1970).addRange(1970, 2000).addUnboundedFrom(2000);
+		requestBuilder = client.prepareSearch("indices").addAggregation(dateRangeBuilder);
+		System.out.println(requestBuilder);
+		response = requestBuilder.get();
+		Range dateRange = response.getAggregations().get("agg");
+
+		for (Range.Bucket bucket : dateRange.getBuckets()) {
+			System.out.println(
+					bucket.getKey() + " " + bucket.getFrom() + " " + bucket.getTo() + " " + bucket.getDocCount());
+		}
+
+		// Histogram Aggregation
+		HistogramBuilder histogramBuilder = AggregationBuilders.histogram("agg").field("height").interval(1);
+		requestBuilder = client.prepareSearch("indices").addAggregation(histogramBuilder);
+		System.out.println(requestBuilder);
+		response = requestBuilder.get();
+		Histogram histogram = response.getAggregations().get("agg");
+
+		for (Histogram.Bucket bucket : histogram.getBuckets()) {
+			System.out.println(bucket.getKey() + " " + bucket.getDocCount());
+		}
+
+		// Date Histogram Aggregation
+		DateHistogramBuilder dateHistogramBuilder = AggregationBuilders.dateHistogram("agg").field("birthday")
+				.interval(DateHistogramInterval.YEAR);
+		requestBuilder = client.prepareSearch("indices").addAggregation(dateHistogramBuilder);
+		System.out.println(requestBuilder);
+		response = requestBuilder.get();
+
+		Histogram dateHistogram = response.getAggregations().get("agg");
+
+		for (Histogram.Bucket bucket : dateHistogram.getBuckets()) {
+			System.out.println(bucket.getKey() + " " + bucket.getDocCount());
+		}
+		
 
 	}
 
